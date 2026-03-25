@@ -1,8 +1,8 @@
 const { Client, GatewayIntentBits } = require("discord.js");
-const { 
-  joinVoiceChannel, 
-  createAudioPlayer, 
-  createAudioResource, 
+const {
+  joinVoiceChannel,
+  createAudioPlayer,
+  createAudioResource,
   AudioPlayerStatus,
   entersState,
   VoiceConnectionStatus
@@ -27,9 +27,9 @@ client.once("ready", () => {
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
 
-  // ping
+  // ping command
   if (message.content === "ping") {
-    message.reply("Pong! 🏓");
+    return message.reply("Pong! 🏓");
   }
 
   // play command
@@ -55,6 +55,10 @@ client.on("messageCreate", async (message) => {
 
       const stream = await play.stream(video.url);
 
+      if (!stream || !stream.stream) {
+        return message.reply("Failed to get audio stream.");
+      }
+
       const resource = createAudioResource(stream.stream, {
         inputType: stream.type,
       });
@@ -68,13 +72,14 @@ client.on("messageCreate", async (message) => {
         connection.destroy();
       });
 
-      player.on("error", (err) => {
-        console.error("Player error:", err.message);
+      player.on("error", (error) => {
+        console.error("PLAYER ERROR:", error);
       });
 
       message.reply(`Now playing: **${video.title}**`);
+
     } catch (err) {
-      console.error(err);
+      console.error("ERROR:", err);
       message.reply("Error playing the song.");
     }
   }
