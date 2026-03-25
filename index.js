@@ -8,7 +8,7 @@ const {
   VoiceConnectionStatus
 } = require("@discordjs/voice");
 
-const play = require("play-dl");
+const ytdl = require("ytdl-core");
 const ytSearch = require("yt-search");
 
 const client = new Client({
@@ -20,7 +20,7 @@ const client = new Client({
   ]
 });
 
-client.once("ready", () => {
+client.once("clientReady", () => {
   console.log(`Logged in as ${client.user.tag}`);
 });
 
@@ -29,22 +29,24 @@ client.on("messageCreate", async (message) => {
 
   // ping command
   if (message.content === "ping") {
-    return message.reply("Pong! 🏓");
+    return message.reply("Pong 🏓");
   }
 
   // play command
   if (message.content.startsWith("p ")) {
     try {
-      const query = message.content.slice(2);
+      const query = message.content.slice(2).trim();
       if (!query) return message.reply("Please provide a song name.");
 
       const voiceChannel = message.member.voice.channel;
       if (!voiceChannel) return message.reply("Join a voice channel first.");
 
+      // search youtube
       const search = await ytSearch(query);
       const video = search.videos[0];
       if (!video) return message.reply("No results found.");
 
+      // join voice
       const connection = joinVoiceChannel({
         channelId: voiceChannel.id,
         guildId: message.guild.id,
@@ -53,15 +55,14 @@ client.on("messageCreate", async (message) => {
 
       await entersState(connection, VoiceConnectionStatus.Ready, 20000);
 
-      const stream = await play.stream(video.url);
-
-      if (!stream || !stream.stream) {
-        return message.reply("Failed to get audio stream.");
-      }
-
-      const resource = createAudioResource(stream.stream, {
-        inputType: stream.type,
+      // stream audio
+      const stream = ytdl(video.url, {
+        filter: "audioonly",
+        quality: "highestaudio",
+        highWaterMark: 1 << 25
       });
+
+      const resource = createAudioResource(stream);
 
       const player = createAudioPlayer();
 
@@ -72,11 +73,11 @@ client.on("messageCreate", async (message) => {
         connection.destroy();
       });
 
-      player.on("error", (error) => {
-        console.error("PLAYER ERROR:", error);
+      player.on("error", (err) => {
+        console.error("PLAYER ERROR:", err);
       });
 
-      message.reply(`Now playing: **${video.title}**`);
+      message.reply(`Now playing: **${video.title}** 🎶`);
 
     } catch (err) {
       console.error("ERROR:", err);
