@@ -26,7 +26,6 @@ client.once("ready", () => {
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
 
-  // 🎧 play command
   if (message.content.startsWith("p ")) {
     try {
       const query = message.content.slice(2).trim();
@@ -40,20 +39,39 @@ client.on("messageCreate", async (message) => {
         return message.reply("Join a voice channel first.");
       }
 
-      // join voice
+      // 🔥 join voice (fixed)
       const connection = joinVoiceChannel({
         channelId: voiceChannel.id,
         guildId: message.guild.id,
         adapterCreator: message.guild.voiceAdapterCreator,
+        selfDeaf: false
       });
 
-      await entersState(connection, VoiceConnectionStatus.Ready, 20000);
+      try {
+        await entersState(connection, VoiceConnectionStatus.Ready, 30000);
+      } catch (error) {
+        connection.destroy();
+        console.log("Voice connection failed:", error);
+        return message.reply("❌ Could not join voice channel");
+      }
 
-      // search + stream
+      // 🔥 fix YouTube issues
+      await play.setToken({
+        youtube: {
+          cookie: process.env.YT_COOKIE || ""
+        }
+      });
+
+      // search
       const result = await play.search(query, { limit: 1 });
       if (!result.length) return message.reply("No results.");
 
+      // stream
       const stream = await play.stream(result[0].url);
+
+      if (!stream || !stream.stream) {
+        return message.reply("❌ Failed to get stream");
+      }
 
       const resource = createAudioResource(stream.stream, {
         inputType: stream.type,
@@ -64,21 +82,27 @@ client.on("messageCreate", async (message) => {
       connection.subscribe(player);
       player.play(resource);
 
+      player.on(AudioPlayerStatus.Playing, () => {
+        console.log("Playing audio...");
+      });
+
       player.on(AudioPlayerStatus.Idle, () => {
         connection.destroy();
       });
 
       player.on("error", (err) => {
-        console.error(err);
+        console.error("PLAYER ERROR:", err);
       });
 
       message.reply(`🎶 Playing: **${result[0].title}**`);
 
     } catch (err) {
-      console.error(err);
+      console.error("ERROR:", err);
       message.reply("❌ Error playing song");
     }
   }
 });
 
-client.login(process.env.TOKEN);
+client.login(process.env.TOKEN)
+  .then(() => console.log("Login success"))
+  .catch(err => console.error("Login failed:", err));
