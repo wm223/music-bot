@@ -10,6 +10,15 @@ const {
 
 const play = require("play-dl");
 
+// 🔥 Anti crash (مهم جدًا)
+process.on("unhandledRejection", (err) => {
+  console.log("UnhandledRejection:", err);
+});
+
+process.on("uncaughtException", (err) => {
+  console.log("UncaughtException:", err);
+});
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -19,24 +28,23 @@ const client = new Client({
   ]
 });
 
-// 🔥 Anti crash system
-process.on("unhandledRejection", (err) => {
-  console.log("Unhandled error:", err);
-});
-
 client.once("ready", () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 });
 
-// ⚡ Fast search helper
-async function searchSong(query) {
-  const res = await play.search(query, { limit: 1 });
-  return res.length ? res[0] : null;
+// ⚡ Fast search (optimized)
+async function fastSearch(query) {
+  try {
+    const res = await play.search(query, { limit: 1 });
+    return res?.[0] || null;
+  } catch (e) {
+    console.log("Search error:", e);
+    return null;
+  }
 }
 
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
-
   if (!message.content.startsWith("p ")) return;
 
   const query = message.content.slice(2);
@@ -45,42 +53,48 @@ client.on("messageCreate", async (message) => {
   if (!voice) return message.reply("❌ Join a voice channel first");
 
   try {
-    // ⚡ FAST SEARCH (optimized)
-    const song = await searchSong(query);
-    if (!song) return message.reply("❌ No song found");
+    // 🔍 SEARCH (fast + safe)
+    const song = await fastSearch(query);
+    if (!song) return message.reply("❌ No results found");
 
     message.reply(`🔍 Found: **${song.title}**`);
 
-    // 🎧 Join voice
+    // 🎧 JOIN VOICE (stable config)
     const connection = joinVoiceChannel({
       channelId: voice.id,
       guildId: message.guild.id,
       adapterCreator: message.guild.voiceAdapterCreator,
-      selfDeaf: false
+      selfDeaf: false,
+      selfMute: false
     });
 
-    // 🔥 Stable voice retry system
-    let ready = false;
+    connection.on("stateChange", (o, n) => {
+      console.log(`Voice: ${o.status} → ${n.status}`);
+    });
 
-    for (let i = 0; i < 3; i++) {
+    // 🔥 RETRY SYSTEM (Anti AbortError)
+    let ok = false;
+
+    for (let i = 0; i < 5; i++) {
       try {
-        await entersState(connection, VoiceConnectionStatus.Ready, 15000);
-        ready = true;
+        await entersState(connection, VoiceConnectionStatus.Ready, 10000);
+        ok = true;
         break;
-      } catch {
-        console.log(`Voice retry ${i + 1}`);
-        await new Promise(r => setTimeout(r, 2000));
+      } catch (e) {
+        console.log("Voice retry:", i + 1);
+        await new Promise(r => setTimeout(r, 2500));
       }
     }
 
-    if (!ready) {
+    if (!ok) {
       connection.destroy();
       return message.reply("❌ Voice connection failed");
     }
 
-    // 🎵 Stream audio
+    // 🎵 STREAM (stable mode)
     const stream = await play.stream(song.url, {
-      discordPlayerCompatibility: true
+      discordPlayerCompatibility: true,
+      quality: 0
     });
 
     const resource = createAudioResource(stream.stream, {
@@ -106,7 +120,7 @@ client.on("messageCreate", async (message) => {
 
   } catch (err) {
     console.log("Fatal error:", err);
-    message.reply("❌ Error playing song");
+    message.reply("❌ Unexpected error occurred");
   }
 });
 
