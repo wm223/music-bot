@@ -19,90 +19,75 @@ const client = new Client({
   ]
 });
 
-client.once("ready", () => {
-  console.log(`Logged in as ${client.user.tag}`);
+// 🔥 Anti-crash system
+process.on("unhandledRejection", err => {
+  console.log("Unhandled error:", err);
 });
+
+client.once("ready", () => {
+  console.log(`✅ Logged in as ${client.user.tag}`);
+});
+
+async function playSong(message, query) {
+  const voice = message.member.voice.channel;
+  if (!voice) return message.reply("Join a voice channel first");
+
+  try {
+    const result = await play.search(query, { limit: 1 });
+    if (!result.length) return message.reply("No results");
+
+    const connection = joinVoiceChannel({
+      channelId: voice.id,
+      guildId: message.guild.id,
+      adapterCreator: message.guild.voiceAdapterCreator,
+      selfDeaf: false
+    });
+
+    // 🔥 Stability boost
+    await entersState(connection, VoiceConnectionStatus.Ready, 30000);
+
+    const stream = await play.stream(result[0].url, {
+      discordPlayerCompatibility: true
+    });
+
+    const resource = createAudioResource(stream.stream, {
+      inputType: stream.type
+    });
+
+    const player = createAudioPlayer();
+
+    connection.subscribe(player);
+    player.play(resource);
+
+    message.reply(`🎶 Now Playing: **${result[0].title}**`);
+
+    // 🔁 auto cleanup
+    player.on(AudioPlayerStatus.Idle, () => {
+      connection.destroy();
+    });
+
+    player.on("error", (e) => {
+      console.log("Player error:", e);
+      connection.destroy();
+    });
+
+  } catch (err) {
+    console.log("ERROR:", err);
+    message.reply("❌ Failed to play song, try again");
+  }
+}
 
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
 
   if (message.content.startsWith("p ")) {
-    try {
-      const query = message.content.slice(2).trim();
+    const query = message.content.slice(2);
+    playSong(message, query);
+  }
 
-      if (!query) {
-        return message.reply("Write a song name.");
-      }
-
-      const voiceChannel = message.member.voice.channel;
-      if (!voiceChannel) {
-        return message.reply("Join a voice channel first.");
-      }
-
-      // 🔥 join voice (fixed)
-      const connection = joinVoiceChannel({
-        channelId: voiceChannel.id,
-        guildId: message.guild.id,
-        adapterCreator: message.guild.voiceAdapterCreator,
-        selfDeaf: false
-      });
-
-      try {
-        await entersState(connection, VoiceConnectionStatus.Ready, 30000);
-      } catch (error) {
-        connection.destroy();
-        console.log("Voice connection failed:", error);
-        return message.reply("❌ Could not join voice channel");
-      }
-
-      // 🔥 fix YouTube issues
-      await play.setToken({
-        youtube: {
-          cookie: process.env.YT_COOKIE || ""
-        }
-      });
-
-      // search
-      const result = await play.search(query, { limit: 1 });
-      if (!result.length) return message.reply("No results.");
-
-      // stream
-      const stream = await play.stream(result[0].url);
-
-      if (!stream || !stream.stream) {
-        return message.reply("❌ Failed to get stream");
-      }
-
-      const resource = createAudioResource(stream.stream, {
-        inputType: stream.type,
-      });
-
-      const player = createAudioPlayer();
-
-      connection.subscribe(player);
-      player.play(resource);
-
-      player.on(AudioPlayerStatus.Playing, () => {
-        console.log("Playing audio...");
-      });
-
-      player.on(AudioPlayerStatus.Idle, () => {
-        connection.destroy();
-      });
-
-      player.on("error", (err) => {
-        console.error("PLAYER ERROR:", err);
-      });
-
-      message.reply(`🎶 Playing: **${result[0].title}**`);
-
-    } catch (err) {
-      console.error("ERROR:", err);
-      message.reply("❌ Error playing song");
-    }
+  if (message.content === "ping") {
+    message.reply("🏓 Pong!");
   }
 });
 
-client.login(process.env.TOKEN)
-  .then(() => console.log("Login success"))
-  .catch(err => console.error("Login failed:", err));
+client.login(process.env.TOKEN);
