@@ -10,14 +10,9 @@ const {
 
 const play = require("play-dl");
 
-// 🔥 Anti crash (مهم جدًا)
-process.on("unhandledRejection", (err) => {
-  console.log("UnhandledRejection:", err);
-});
-
-process.on("uncaughtException", (err) => {
-  console.log("UncaughtException:", err);
-});
+// 🔥 حماية من الكراش
+process.on("unhandledRejection", console.log);
+process.on("uncaughtException", console.log);
 
 const client = new Client({
   intents: [
@@ -32,17 +27,6 @@ client.once("ready", () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 });
 
-// ⚡ Fast search (optimized)
-async function fastSearch(query) {
-  try {
-    const res = await play.search(query, { limit: 1 });
-    return res?.[0] || null;
-  } catch (e) {
-    console.log("Search error:", e);
-    return null;
-  }
-}
-
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
   if (!message.content.startsWith("p ")) return;
@@ -53,74 +37,65 @@ client.on("messageCreate", async (message) => {
   if (!voice) return message.reply("❌ Join a voice channel first");
 
   try {
-    // 🔍 SEARCH (fast + safe)
-    const song = await fastSearch(query);
-    if (!song) return message.reply("❌ No results found");
+    // 🔍 search
+    const result = await play.search(query, { limit: 1 });
+    if (!result.length) return message.reply("❌ No song found");
 
-    message.reply(`🔍 Found: **${song.title}**`);
+    const song = result[0];
 
-    // 🎧 JOIN VOICE (stable config)
+    message.reply(`🎶 Loading: **${song.title}**`);
+
+    // 🎧 join voice
     const connection = joinVoiceChannel({
       channelId: voice.id,
       guildId: message.guild.id,
       adapterCreator: message.guild.voiceAdapterCreator,
-      selfDeaf: false,
-      selfMute: false
+      selfDeaf: false
     });
 
-    connection.on("stateChange", (o, n) => {
-      console.log(`Voice: ${o.status} → ${n.status}`);
-    });
+    // 🔥 ثابت جدًا
+    await entersState(connection, VoiceConnectionStatus.Ready, 20000);
 
-    // 🔥 RETRY SYSTEM (Anti AbortError)
-    let ok = false;
+    const player = createAudioPlayer();
 
-    for (let i = 0; i < 5; i++) {
-      try {
-        await entersState(connection, VoiceConnectionStatus.Ready, 10000);
-        ok = true;
-        break;
-      } catch (e) {
-        console.log("Voice retry:", i + 1);
-        await new Promise(r => setTimeout(r, 2500));
-      }
-    }
+    connection.subscribe(player);
 
-    if (!ok) {
-      connection.destroy();
-      return message.reply("❌ Voice connection failed");
-    }
-
-    // 🎵 STREAM (stable mode)
-    const stream = await play.stream(song.url, {
-      discordPlayerCompatibility: true,
-      quality: 0
-    });
+    // 🎵 stream
+    const stream = await play.stream(song.url);
 
     const resource = createAudioResource(stream.stream, {
       inputType: stream.type
     });
 
-    const player = createAudioPlayer();
-
-    connection.subscribe(player);
     player.play(resource);
 
-    message.reply(`🎶 Now Playing: **${song.title}**`);
+    message.reply(`▶️ Playing: **${song.title}**`);
 
-    // 🔁 Auto cleanup
+    // 🔥 أهم تعديل (لا يطلع من الروم إلا لما يوقف اللاعب فعليًا)
+    let isPlaying = true;
+
     player.on(AudioPlayerStatus.Idle, () => {
-      connection.destroy();
+      if (!isPlaying) return;
+      isPlaying = false;
+
+      setTimeout(() => {
+        connection.destroy();
+      }, 2000); // يعطي وقت قبل الخروج
     });
 
+    // ❌ errors
     player.on("error", (err) => {
       console.log("Player error:", err);
       connection.destroy();
     });
 
+    connection.on("stateChange", (oldS, newS) => {
+      console.log(`Voice: ${oldS.status} → ${newS.status}`);
+    });
+
   } catch (err) {
-    console.log("Fatal error:", err);
-    message.reply("❌ Unexpected error occurred");
+    console.log(err);
+    message.reply("❌ Error playing song");
   }
 });
 
