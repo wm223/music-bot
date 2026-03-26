@@ -3,13 +3,12 @@ const {
   joinVoiceChannel,
   createAudioPlayer,
   createAudioResource,
-  AudioPlayerStatus,
   entersState,
-  VoiceConnectionStatus
+  VoiceConnectionStatus,
+  AudioPlayerStatus
 } = require("@discordjs/voice");
 
-const ytdl = require("ytdl-core");
-const ytSearch = require("yt-search");
+const play = require("play-dl");
 
 const client = new Client({
   intents: [
@@ -20,31 +19,26 @@ const client = new Client({
   ]
 });
 
-client.once("clientReady", () => {
+client.once("ready", () => {
   console.log(`Logged in as ${client.user.tag}`);
 });
 
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
 
-  // ping command
-  if (message.content === "ping") {
-    return message.reply("Pong 🏓");
-  }
-
-  // play command
+  // 🎧 play command
   if (message.content.startsWith("p ")) {
     try {
       const query = message.content.slice(2).trim();
-      if (!query) return message.reply("Please provide a song name.");
+
+      if (!query) {
+        return message.reply("Write a song name.");
+      }
 
       const voiceChannel = message.member.voice.channel;
-      if (!voiceChannel) return message.reply("Join a voice channel first.");
-
-      // search youtube
-      const search = await ytSearch(query);
-      const video = search.videos[0];
-      if (!video) return message.reply("No results found.");
+      if (!voiceChannel) {
+        return message.reply("Join a voice channel first.");
+      }
 
       // join voice
       const connection = joinVoiceChannel({
@@ -55,14 +49,15 @@ client.on("messageCreate", async (message) => {
 
       await entersState(connection, VoiceConnectionStatus.Ready, 20000);
 
-      // stream audio
-      const stream = ytdl(video.url, {
-        filter: "audioonly",
-        quality: "highestaudio",
-        highWaterMark: 1 << 25
-      });
+      // search + stream
+      const result = await play.search(query, { limit: 1 });
+      if (!result.length) return message.reply("No results.");
 
-      const resource = createAudioResource(stream);
+      const stream = await play.stream(result[0].url);
+
+      const resource = createAudioResource(stream.stream, {
+        inputType: stream.type,
+      });
 
       const player = createAudioPlayer();
 
@@ -74,18 +69,16 @@ client.on("messageCreate", async (message) => {
       });
 
       player.on("error", (err) => {
-        console.error("PLAYER ERROR:", err);
+        console.error(err);
       });
 
-      message.reply(`Now playing: **${video.title}** 🎶`);
+      message.reply(`🎶 Playing: **${result[0].title}**`);
 
     } catch (err) {
-      console.error("ERROR:", err);
-      message.reply("Error playing the song.");
+      console.error(err);
+      message.reply("❌ Error playing song");
     }
   }
 });
 
-client.login(process.env.TOKEN)
-  .then(() => console.log("Login success"))
-  .catch(err => console.error("Login failed:", err));
+client.login(process.env.TOKEN);
