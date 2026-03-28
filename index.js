@@ -5,18 +5,19 @@ const {
   createAudioResource,
   entersState,
   VoiceConnectionStatus,
-  AudioPlayerStatus
+  AudioPlayerStatus,
+  NoSubscriberBehavior
 } = require("@discordjs/voice");
 
 const play = require("play-dl");
 const express = require("express");
 
-// 🌐 Web server (عشان Render ما يطفّي)
+// 🌐 keep alive server (Render fix)
 const app = express();
-app.get("/", (req, res) => res.send("Bot is running"));
+app.get("/", (req, res) => res.send("Bot alive"));
 app.listen(3000, () => console.log("🌐 Web server running"));
 
-// 🔥 Anti crash
+// 💥 anti crash
 process.on("unhandledRejection", console.log);
 process.on("uncaughtException", console.log);
 
@@ -33,11 +34,11 @@ client.once("ready", () => {
   console.log(`🔥 Logged in as ${client.user.tag}`);
 });
 
-// 🔍 Fast search
-async function search(query) {
+// 🔍 safer search
+async function searchSong(query) {
   try {
     const res = await play.search(query, { limit: 1 });
-    return res?.[0] || null;
+    return res?.[0];
   } catch {
     return null;
   }
@@ -50,15 +51,17 @@ client.on("messageCreate", async (message) => {
   const query = message.content.slice(2);
   const voice = message.member.voice.channel;
 
-  if (!voice) return message.reply("❌ Join voice first");
+  if (!voice) return message.reply("❌ Join a voice channel first");
+
+  const song = await searchSong(query);
+  if (!song) return message.reply("❌ No results found");
+
+  message.reply(`🔍 Found: **${song.title}**`);
+
+  let connection;
 
   try {
-    const song = await search(query);
-    if (!song) return message.reply("❌ No results");
-
-    message.reply(`🔍 Found: **${song.title}**`);
-
-    const connection = joinVoiceChannel({
+    connection = joinVoiceChannel({
       channelId: voice.id,
       guildId: message.guild.id,
       adapterCreator: message.guild.voiceAdapterCreator,
@@ -66,76 +69,82 @@ client.on("messageCreate", async (message) => {
       selfMute: false
     });
 
+    connection.rejoinAttempts = 5;
+
     connection.on("stateChange", (o, n) => {
       console.log(`Voice: ${o.status} → ${n.status}`);
     });
 
-    // 🔥 Strong retry system
-    let connected = false;
-    for (let i = 0; i < 7; i++) {
-      try {
-        await entersState(connection, VoiceConnectionStatus.Ready, 10000);
-        connected = true;
-        break;
-      } catch {
-        console.log(`Retry ${i + 1}`);
-        await new Promise(r => setTimeout(r, 2500));
-      }
-    }
-
-    if (!connected) {
-      connection.destroy();
-      return message.reply("❌ Voice failed");
-    }
-
-    // 🎵 Stream
-    let stream;
-    try {
-      stream = await play.stream(song.url, {
-        discordPlayerCompatibility: true,
-        quality: 2
-      });
-    } catch (err) {
-      console.log("Stream error:", err);
-      connection.destroy();
-      return message.reply("❌ Stream failed");
-    }
-
-    const resource = createAudioResource(stream.stream, {
-      inputType: stream.type,
-      inlineVolume: true
+    connection.on("error", (err) => {
+      console.log("Voice error:", err);
     });
 
-    resource.volume.setVolume(0.7);
-
-    const player = createAudioPlayer();
-    connection.subscribe(player);
-
-    player.play(resource);
-
-    message.reply(`🎶 Now Playing: **${song.title}**`);
-
-    let ended = false;
-
-    player.on(AudioPlayerStatus.Idle, () => {
-      if (ended) return;
-      ended = true;
-
-      setTimeout(() => {
-        connection.destroy();
-      }, 3000);
-    });
-
-    player.on("error", (err) => {
-      console.log("Player error:", err);
-      connection.destroy();
-      message.reply("❌ Player error");
-    });
+    // 🔥 MUCH stronger stability timeout
+    await entersState(
+      connection,
+      VoiceConnectionStatus.Ready,
+      25000
+    );
 
   } catch (err) {
-    console.log("Fatal error:", err);
-    message.reply("❌ Unexpected error");
+    console.log("Join failed:", err);
+    if (connection) connection.destroy();
+    return message.reply("❌ Failed to join voice (unstable network)");
   }
+
+  // 🎧 stream safe mode
+  let stream;
+  try {
+    stream = await play.stream(song.url, {
+      discordPlayerCompatibility: true,
+      quality: 2
+    });
+  } catch (err) {
+    console.log("Stream error:", err);
+    connection.destroy();
+    return message.reply("❌ Stream failed");
+  }
+
+  const resource = createAudioResource(stream.stream, {
+    inputType: stream.type
+  });
+
+  const player = createAudioPlayer({
+    behaviors: {
+      noSubscriber: NoSubscriberBehavior.Pause
+    }
+  });
+
+  connection.subscribe(player);
+
+  player.play(resource);
+
+  message.reply(`🎶 Now Playing: **${song.title}**`);
+
+  // 🔥 HARD anti-disconnect system
+  const keepAlive = setInterval(() => {
+    if (!connection) return;
+    if (connection.state.status === "ready") {
+      connection.ping?.();
+    }
+  }, 20000);
+
+  player.on(AudioPlayerStatus.Idle, () => {
+    clearInterval(keepAlive);
+    connection.destroy();
+  });
+
+  player.on("error", (err) => {
+    console.log("Player error:", err);
+    clearInterval(keepAlive);
+    connection.destroy();
+  });
+
+  connection.on("stateChange", (oldS, newS) => {
+    if (newS.status === "destroyed") {
+      clearInterval(keepAlive);
+    }
+  });
 });
 
 client.login(process.env.TOKEN);
