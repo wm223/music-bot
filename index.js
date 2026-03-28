@@ -10,7 +10,6 @@ const {
 
 const play = require("play-dl");
 
-// 🔥 Anti crash
 process.on("unhandledRejection", console.log);
 process.on("uncaughtException", console.log);
 
@@ -24,18 +23,8 @@ const client = new Client({
 });
 
 client.once("ready", () => {
-  console.log(`✅ Logged in as ${client.user.tag}`);
+  console.log(`🔥 Logged in as ${client.user.tag}`);
 });
-
-// 🔍 Fast Search
-async function search(query) {
-  try {
-    const res = await play.search(query, { limit: 1 });
-    return res?.[0] || null;
-  } catch {
-    return null;
-  }
-}
 
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
@@ -44,92 +33,65 @@ client.on("messageCreate", async (message) => {
   const query = message.content.slice(2);
   const voice = message.member.voice.channel;
 
-  if (!voice) return message.reply("❌ Join a voice channel first");
+  if (!voice) return message.reply("Join VC");
 
   try {
-    const song = await search(query);
-    if (!song) return message.reply("❌ No results found");
+    const result = await play.search(query, { limit: 1 });
+    if (!result.length) return message.reply("No result");
 
-    message.reply(`🔍 Found: **${song.title}**`);
+    const song = result[0];
 
     const connection = joinVoiceChannel({
       channelId: voice.id,
       guildId: message.guild.id,
       adapterCreator: message.guild.voiceAdapterCreator,
-      selfDeaf: false,
-      selfMute: false
+      selfDeaf: true
     });
 
-    // 🔄 Debug
-    connection.on("stateChange", (o, n) => {
-      console.log(`Voice: ${o.status} → ${n.status}`);
-    });
-
-    // 🔥 Retry connection
+    // 🔥 FIX ABORT ERROR (strong retry)
     let connected = false;
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 7; i++) {
       try {
-        await entersState(connection, VoiceConnectionStatus.Ready, 15000);
+        await entersState(connection, VoiceConnectionStatus.Ready, 10000);
         connected = true;
         break;
       } catch {
-        console.log(`Retry ${i + 1}`);
-        await new Promise(r => setTimeout(r, 2500));
+        await new Promise(r => setTimeout(r, 2000));
       }
     }
 
     if (!connected) {
       connection.destroy();
-      return message.reply("❌ Voice connection failed");
+      return message.reply("Voice failed");
     }
 
-    // 🎵 Stream (محسّن)
-    let stream;
-    try {
-      stream = await play.stream(song.url, {
-        discordPlayerCompatibility: true,
-        quality: 2
-      });
-    } catch (err) {
-      console.log("Stream error:", err);
-      connection.destroy();
-      return message.reply("❌ Failed to get audio");
-    }
-
-    const resource = createAudioResource(stream.stream, {
-      inputType: stream.type,
-      inlineVolume: true
+    const stream = await play.stream(song.url, {
+      discordPlayerCompatibility: true
     });
 
-    resource.volume.setVolume(0.7);
+    const resource = createAudioResource(stream.stream, {
+      inputType: stream.type
+    });
 
     const player = createAudioPlayer();
     connection.subscribe(player);
 
     player.play(resource);
 
-    message.reply(`🎶 Now Playing: **${song.title}**`);
-
-    let ended = false;
+    message.reply(`🎶 ${song.title}`);
 
     player.on(AudioPlayerStatus.Idle, () => {
-      if (ended) return;
-      ended = true;
-
-      setTimeout(() => {
-        connection.destroy();
-      }, 2000);
+      setTimeout(() => connection.destroy(), 3000);
     });
 
     player.on("error", (err) => {
-      console.log("Player error:", err);
+      console.log(err);
       connection.destroy();
-      message.reply("❌ Player error");
     });
 
   } catch (err) {
-    console.log("Fatal:", err);
-    message.reply("❌ Unexpected error");
+    console.log(err);
+    message.reply("Error");
   }
 });
 
