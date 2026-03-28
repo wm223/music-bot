@@ -1,6 +1,6 @@
 {
-  "name": "music-bot-stable",
-  "version": "3.0.0",
+  "name": "pro-music-bot",
+  "version": "1.0.0",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
